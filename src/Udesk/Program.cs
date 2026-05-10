@@ -35,6 +35,13 @@ public static class Program
                         options.Pin,
                         sp.GetRequiredService<ILogger<PinAuthProvider>>()));
                 services.AddSingleton<SleepPreventer>();
+                services.AddSingleton<CredentialStore>();
+                services.AddSingleton<LockScreenDetector>();
+                services.AddSingleton<ILockScreenHandler>(sp =>
+                    new SasUnlockHandler(
+                        sp.GetRequiredService<IInputController>(),
+                        sp.GetRequiredService<CredentialStore>(),
+                        sp.GetRequiredService<ILogger<SasUnlockHandler>>()));
                 services.AddSingleton<UdeskServer>();
                 services.AddHostedService<UdeskHostedService>();
             })

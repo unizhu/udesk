@@ -23,8 +23,17 @@ public sealed class UdeskServer : IDisposable
     private readonly ConcurrentDictionary<string, ViewerConnection> _viewers = new();
     private readonly HttpListener _httpListener;
     private readonly SleepPreventer _sleepPreventer;
+    private readonly LockScreenDetector _lockDetector;
+    private readonly ILockScreenHandler _lockHandler;
     private CancellationTokenSource? _serverCts;
     private bool _disposed;
+    private bool _screenLocked;
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     public UdeskServer(
         IScreenCapture capture,
@@ -32,6 +41,8 @@ public sealed class UdeskServer : IDisposable
         IAuthProvider authProvider,
         UdeskOptions options,
         SleepPreventer sleepPreventer,
+        LockScreenDetector lockDetector,
+        ILockScreenHandler lockHandler,
         ILogger<UdeskServer> logger)
     {
         _capture = capture;
@@ -41,6 +52,11 @@ public sealed class UdeskServer : IDisposable
         _sleepPreventer = sleepPreventer;
         _logger = logger;
         _httpListener = new HttpListener();
+
+        // Wire lock state change to broadcast
+        _lockDetector = lockDetector;
+        _lockHandler = lockHandler;
+        _lockDetector.LockStateChanged += OnLockStateChanged;
     }
 
     /// <summary>
@@ -58,6 +74,9 @@ public sealed class UdeskServer : IDisposable
 
         // Start frame broadcast loop
         var broadcastTask = BroadcastFramesAsync(_serverCts.Token);
+
+        // Start lock screen polling (every 2 seconds)
+        var lockPollTask = PollLockStateAsync(_serverCts.Token);
 
         try
         {
@@ -81,7 +100,7 @@ public sealed class UdeskServer : IDisposable
         }
         finally
         {
-            await broadcastTask.ConfigureAwait(false);
+            await Task.WhenAll(broadcastTask, lockPollTask).ConfigureAwait(false);
         }
     }
 
@@ -159,7 +178,7 @@ public sealed class UdeskServer : IDisposable
     private async Task HandleViewerMessagesAsync(ViewerConnection connection)
     {
         var buffer = new byte[4096];
-        var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        var jsonOptions = JsonOptions;
 
         while (!connection.CancellationToken.IsCancellationRequested)
         {
@@ -204,14 +223,14 @@ public sealed class UdeskServer : IDisposable
                         CaptureHeight = (int)(_capture.ScreenHeight * _options.ScaleFactor),
                     };
                     await connection.SendTextAsync(
-                        JsonSerializer.Serialize(welcome), connection.CancellationToken).ConfigureAwait(false);
+                        JsonSerializer.Serialize(welcome, JsonOptions), connection.CancellationToken).ConfigureAwait(false);
                     _logger.LogInformation("Viewer {Id} authenticated", connection.ConnectionId);
                 }
                 else
                 {
                     var failed = new Protocol.AuthFailedMessage { Reason = "Invalid PIN" };
                     await connection.SendTextAsync(
-                        JsonSerializer.Serialize(failed), connection.CancellationToken).ConfigureAwait(false);
+                        JsonSerializer.Serialize(failed, JsonOptions), connection.CancellationToken).ConfigureAwait(false);
                     connection.Disconnect();
                 }
                 break;
@@ -236,7 +255,43 @@ public sealed class UdeskServer : IDisposable
                 if (textMsg is null) break;
                 _input.TypeText(textMsg.Value);
                 break;
+
+            case "unlock":
+                if (!connection.Authenticated) break;
+                _ = HandleUnlockAsync(connection, connection.CancellationToken);
+                break;
+
+            case "store_credential":
+                if (!connection.Authenticated) break;
+                var credMsg = JsonSerializer.Deserialize<Protocol.StoreCredentialRequest>(json, jsonOptions);
+                if (credMsg is null) break;
+                await _lockHandler.StoreCredentialAsync(credMsg.Credential).ConfigureAwait(false);
+                break;
         }
+    }
+
+    private async Task HandleUnlockAsync(ViewerConnection connection, CancellationToken cancellationToken)
+    {
+        if (!_lockHandler.HasCredential)
+        {
+            var noCred = new Protocol.UnlockResultMessage
+            {
+                Success = false,
+                HasCredential = false,
+                Error = "No credential stored. Please provide Windows login PIN first."
+            };
+            await connection.SendTextAsync(JsonSerializer.Serialize(noCred, JsonOptions), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var success = await _lockHandler.UnlockAsync(cancellationToken).ConfigureAwait(false);
+        var result = new Protocol.UnlockResultMessage
+        {
+            Success = success,
+            HasCredential = true,
+            Error = success ? null : "Unlock sequence failed. Check Group Policy: Enable software SASEnabled."
+        };
+        await connection.SendTextAsync(JsonSerializer.Serialize(result, JsonOptions), cancellationToken).ConfigureAwait(false);
     }
 
     private void ProcessMouseEvent(Protocol.MouseEvent msg)
@@ -275,6 +330,43 @@ public sealed class UdeskServer : IDisposable
                 _input.KeyUp(msg.KeyCode);
                 break;
         }
+    }
+
+    private async Task PollLockStateAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                _lockDetector.Poll();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown
+        }
+    }
+
+    private void OnLockStateChanged(bool locked)
+    {
+        _screenLocked = locked;
+        var msg = new Protocol.LockStateMessage { Locked = locked };
+        var json = JsonSerializer.Serialize(msg, JsonOptions);
+
+        foreach (var viewer in _viewers.Values.Where(v => v.Authenticated))
+        {
+            _ = viewer.SendTextAsync(json, CancellationToken.None);
+        }
+    }
+
+    private async Task BroadcastToAllAsync(string json, CancellationToken cancellationToken)
+    {
+        var viewers = _viewers.Values.Where(v => v.Authenticated).ToList();
+        if (viewers.Count == 0) return;
+
+        var tasks = viewers.Select(v => v.SendTextAsync(json, cancellationToken));
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     private async Task BroadcastFramesAsync(CancellationToken cancellationToken)

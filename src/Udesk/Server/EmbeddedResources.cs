@@ -35,6 +35,18 @@ body { background: #1a1a2e; color: #eee; font-family: -apple-system, BlinkMacSys
 #pin-submit:hover { background: #4ecca3; }
 #pin-error { color: #e94560; margin-top: 10px; font-size: 13px; display: none; }
 canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; image-rendering: auto; display: block; }
+#lock-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); display: none; align-items: center; justify-content: center; z-index: 90; }
+#lock-box { background: #16213e; padding: 30px 40px; border-radius: 12px; text-align: center; }
+#lock-box h2 { margin-bottom: 12px; font-size: 22px; }
+#lock-box p { color: #aaa; margin-bottom: 16px; font-size: 14px; }
+#lock-box button { margin: 4px; padding: 10px 24px; font-size: 15px; border: none; border-radius: 8px; cursor: pointer; }
+#btn-unlock { background: #4ecca3; color: #1a1a2e; }
+#btn-unlock:hover { background: #3baa88; }
+#btn-set-cred { background: #0f3460; color: #eee; }
+#btn-set-cred:hover { background: #1a4a8a; }
+#cred-input { padding: 8px 14px; font-size: 16px; border: 2px solid #0f3460; border-radius: 8px; background: #1a1a2e; color: #eee; width: 180px; text-align: center; letter-spacing: 4px; margin-bottom: 10px; display: none; }
+#cred-input:focus { outline: none; border-color: #4ecca3; }
+#unlock-error { color: #e94560; margin-top: 8px; font-size: 13px; display: none; }
 </style>
 </head>
 <body>
@@ -49,6 +61,22 @@ canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; im
   </div>
 </div>
 <canvas id="screen"></canvas>
+<div id="lock-overlay">
+  <div id="lock-box">
+    <h2>🔒 Screen Locked</h2>
+    <p>The remote Windows session is locked.</p>
+    <div id="cred-section" style="display:none">
+      <p>Enter your Windows login PIN/password:</p>
+      <input type="password" id="cred-input" maxlength="32" placeholder="Windows PIN">
+      <br>
+    </div>
+    <div id="unlock-buttons">
+      <button id="btn-unlock">🔓 Unlock</button>
+      <button id="btn-set-cred">🔑 Set Credential</button>
+    </div>
+    <div id="unlock-error"></div>
+  </div>
+</div>
 <script>
 (function() {
   const canvas = document.getElementById('screen');
@@ -112,7 +140,7 @@ canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; im
   function handleMessage(msg) {
     switch (msg.type) {
       case 'welcome':
-        statusEl.textContent = 'Connected — ' + msg.capture_width + 'x' + msg.capture_height;
+        statusEl.textContent = 'Connected — ' + msg.captureWidth + 'x' + msg.captureHeight;
         pinOverlay.style.display = 'none';
         lastPin = pinInput.value;
         needsPin = false;
@@ -125,7 +153,26 @@ canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; im
         if (ws) { ws.close(); ws = null; }
         break;
       case 'status':
-        statusEl.textContent = 'Connected — ' + (msg.viewer_count || 1) + ' viewer(s)';
+        statusEl.textContent = 'Connected — ' + (msg.viewerCount || 1) + ' viewer(s)';
+        break;
+      case 'lock_state':
+        if (msg.locked) {
+          document.getElementById('lock-overlay').style.display = 'flex';
+        } else {
+          document.getElementById('lock-overlay').style.display = 'none';
+          document.getElementById('cred-section').style.display = 'none';
+          document.getElementById('unlock-error').style.display = 'none';
+        }
+        break;
+      case 'unlock_result':
+        if (!msg.success) {
+          const errEl = document.getElementById('unlock-error');
+          errEl.textContent = msg.error || 'Unlock failed';
+          errEl.style.display = 'block';
+          if (!msg.hasCredential) {
+            showCredInput();
+          }
+        }
         break;
     }
   }
@@ -214,6 +261,34 @@ canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; im
   pinInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { connect(); }
   });
+
+  // Lock screen controls
+  document.getElementById('btn-unlock').addEventListener('click', () => {
+    send({ type: 'unlock' });
+    document.getElementById('unlock-error').style.display = 'none';
+  });
+
+  document.getElementById('btn-set-cred').addEventListener('click', () => {
+    showCredInput();
+  });
+
+  document.getElementById('cred-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const cred = document.getElementById('cred-input').value;
+      if (cred) {
+        send({ type: 'store_credential', credential: cred });
+        document.getElementById('cred-section').style.display = 'none';
+        document.getElementById('cred-input').value = '';
+        // Auto-unlock after storing credential
+        setTimeout(() => send({ type: 'unlock' }), 300);
+      }
+    }
+  });
+
+  function showCredInput() {
+    document.getElementById('cred-section').style.display = 'block';
+    document.getElementById('cred-input').focus();
+  }
 
   // Auto-connect; if server requires PIN, overlay will show after auth_failed
   connect();

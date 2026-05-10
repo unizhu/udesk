@@ -40,6 +40,26 @@ internal static class Protocol
         public required int ViewerCount { get; init; }
     }
 
+    /// <summary>
+    /// Sent when the screen lock state changes.
+    /// </summary>
+    public sealed class LockStateMessage
+    {
+        public string Type => "lock_state";
+        public required bool Locked { get; init; }
+    }
+
+    /// <summary>
+    /// Sent when an unlock request completes (success or failure).
+    /// </summary>
+    public sealed class UnlockResultMessage
+    {
+        public string Type => "unlock_result";
+        public required bool Success { get; init; }
+        public required bool HasCredential { get; init; }
+        public string? Error { get; init; }
+    }
+
     // === Viewer → Server messages ===
 
     /// <summary>
@@ -81,5 +101,22 @@ internal static class Protocol
     {
         public string Type => "text";
         public required string Value { get; init; }
+    }
+
+    /// <summary>
+    /// Request to unlock the remote session.
+    /// </summary>
+    public sealed class UnlockRequest
+    {
+        public string Type => "unlock";
+    }
+
+    /// <summary>
+    /// Store Windows login credential for auto-unlock.
+    /// </summary>
+    public sealed class StoreCredentialRequest
+    {
+        public string Type => "store_credential";
+        public required string Credential { get; init; }
     }
 }

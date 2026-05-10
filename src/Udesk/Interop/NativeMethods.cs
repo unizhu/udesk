@@ -22,6 +22,13 @@ internal static partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool GetCursorPos(out POINT lpPoint);
 
+    [LibraryImport("user32.dll", SetLastError = true)]
+    internal static partial IntPtr OpenInputDesktop(uint dwFlags, [MarshalAs(UnmanagedType.Bool)] bool fInherit, uint dwDesiredAccess);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool CloseDesktop(IntPtr hDesktop);
+
     // === kernel32.dll ===
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
@@ -140,4 +147,11 @@ internal static class SystemMetrics
     public const int SM_CXSCREEN = 0;
     public const int SM_CYSCREEN = 1;
     public const int SM_CMONITORS = 80;
+}
+
+/// <summary>Desktop access rights for OpenInputDesktop.</summary>
+internal static class DesktopAccessRights
+{
+    public const uint DESKTOP_READOBJECTS = 0x0001;
+    public const uint DESKTOP_WRITEOBJECTS = 0x0080;
 }
