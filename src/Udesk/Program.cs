@@ -1,0 +1,113 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Udesk.Capture;
+using Udesk.Input;
+using Udesk.Security;
+using Udesk.Server;
+
+namespace Udesk;
+
+/// <summary>
+/// Udesk — lightweight remote desktop for Windows.
+/// No admin privileges, no drivers, no external dependencies.
+/// Browser-based viewer (Safari/Chrome on macOS).
+/// </summary>
+public static class Program
+{
+    public static async Task<int> Main(string[] args)
+    {
+        var options = ParseArgs(args);
+
+        using var host = Host.CreateDefaultBuilder(args)
+            .ConfigureServices((_, services) =>
+            {
+                services.AddSingleton(options);
+                services.AddSingleton<IScreenCapture>(sp =>
+                    new GdiScreenCapture(
+                        options.Fps,
+                        options.JpegQuality,
+                        options.ScaleFactor,
+                        sp.GetRequiredService<ILogger<GdiScreenCapture>>()));
+                services.AddSingleton<IInputController, SendInputController>();
+                services.AddSingleton<IAuthProvider>(sp =>
+                    new PinAuthProvider(
+                        options.Pin,
+                        sp.GetRequiredService<ILogger<PinAuthProvider>>()));
+                services.AddSingleton<UdeskServer>();
+                services.AddHostedService<UdeskHostedService>();
+            })
+            .ConfigureLogging(builder =>
+            {
+                builder.SetMinimumLevel(LogLevel.Information);
+            })
+            .Build();
+
+        var logger = host.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogInformation("Udesk starting on port {Port}, FPS: {Fps}, Quality: {Quality}%",
+            options.Port, options.Fps, options.JpegQuality);
+
+        if (options.Pin is not null)
+        {
+            logger.LogInformation("PIN protection enabled");
+        }
+
+        try
+        {
+            await host.RunAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Udesk terminated unexpectedly");
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private static UdeskOptions ParseArgs(string[] args)
+    {
+        var options = new UdeskOptions();
+
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--port" or "-p":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out var port))
+                        options = options with { Port = Math.Clamp(port, 1, 65535) };
+                    break;
+                case "--fps" or "-f":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out var fps))
+                        options = options with { Fps = Math.Clamp(fps, 1, 30) };
+                    break;
+                case "--quality" or "-q":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out var quality))
+                        options = options with { JpegQuality = Math.Clamp(quality, 1, 100) };
+                    break;
+                case "--pin":
+                    if (i + 1 < args.Length)
+                    {
+                        var pin = args[++i];
+                        if (pin.Length is >= 4 and <= 8)
+                            options = options with { Pin = pin };
+                    }
+                    break;
+                case "--help" or "-h":
+                    Console.WriteLine("Udesk — Lightweight Remote Desktop");
+                    Console.WriteLine();
+                    Console.WriteLine("Usage: udesk [options]");
+                    Console.WriteLine();
+                    Console.WriteLine("Options:");
+                    Console.WriteLine("  --port, -p <port>      Port to listen on (default: 8080)");
+                    Console.WriteLine("  --fps, -f <fps>        Target frames per second (default: 5)");
+                    Console.WriteLine("  --quality, -q <1-100>  JPEG quality (default: 40)");
+                    Console.WriteLine("  --pin <4-8 digits>     Optional PIN for viewer authentication");
+                    Console.WriteLine("  --help, -h             Show this help");
+                    Environment.Exit(0);
+                    break;
+            }
+        }
+
+        return options;
+    }
+}
