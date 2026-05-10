@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Udesk.Capture;
 using Udesk.Input;
+using Udesk.LockScreen;
 using Udesk.Security;
 using Udesk.Server;
 
@@ -33,6 +34,7 @@ public static class Program
                     new PinAuthProvider(
                         options.Pin,
                         sp.GetRequiredService<ILogger<PinAuthProvider>>()));
+                services.AddSingleton<SleepPreventer>();
                 services.AddSingleton<UdeskServer>();
                 services.AddHostedService<UdeskHostedService>();
             })

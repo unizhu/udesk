@@ -4,6 +4,7 @@ using System.Net.WebSockets;
 using System.Text.Json;
 using Udesk.Capture;
 using Udesk.Input;
+using Udesk.LockScreen;
 using Udesk.Security;
 
 namespace Udesk.Server;
@@ -21,6 +22,7 @@ public sealed class UdeskServer : IDisposable
     private readonly ILogger<UdeskServer> _logger;
     private readonly ConcurrentDictionary<string, ViewerConnection> _viewers = new();
     private readonly HttpListener _httpListener;
+    private readonly SleepPreventer _sleepPreventer;
     private CancellationTokenSource? _serverCts;
     private bool _disposed;
 
@@ -29,12 +31,14 @@ public sealed class UdeskServer : IDisposable
         IInputController input,
         IAuthProvider authProvider,
         UdeskOptions options,
+        SleepPreventer sleepPreventer,
         ILogger<UdeskServer> logger)
     {
         _capture = capture;
         _input = input;
         _authProvider = authProvider;
         _options = options;
+        _sleepPreventer = sleepPreventer;
         _logger = logger;
         _httpListener = new HttpListener();
     }
@@ -124,6 +128,12 @@ public sealed class UdeskServer : IDisposable
         _viewers[connectionId] = connection;
         _logger.LogInformation("Viewer {Id} connected. Total viewers: {Count}", connectionId, _viewers.Count);
 
+        // Prevent sleep while viewers are connected
+        if (_viewers.Count == 1)
+        {
+            _sleepPreventer.PreventSleep();
+        }
+
         try
         {
             await HandleViewerMessagesAsync(connection).ConfigureAwait(false);
@@ -137,6 +147,12 @@ public sealed class UdeskServer : IDisposable
             _viewers.TryRemove(connectionId, out _);
             connection.Dispose();
             _logger.LogInformation("Viewer {Id} disconnected. Total viewers: {Count}", connectionId, _viewers.Count);
+
+            // Allow sleep when no viewers remain
+            if (_viewers.IsEmpty)
+            {
+                _sleepPreventer.AllowSleep();
+            }
         }
     }
 
