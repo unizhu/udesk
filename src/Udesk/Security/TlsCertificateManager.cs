@@ -144,7 +144,7 @@ public sealed class TlsCertificateManager
 
             // Basic constraints: CA=false, end entity
             request.CertificateExtensions.Add(
-                new X509BasicConstraintsExtension(certificateAuthority: false, pathLengthConstraint: 0, critical: true));
+                new X509BasicConstraintsExtension(certificateAuthority: false, hasPathLengthConstraint: false, pathLengthConstraint: 0, critical: true));
 
             // Enhanced key usage: Server Authentication
             request.CertificateExtensions.Add(
