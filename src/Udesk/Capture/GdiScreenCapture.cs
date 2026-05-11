@@ -23,6 +23,7 @@ public sealed class GdiScreenCapture : IScreenCapture
     private List<MonitorInfo> _monitors = [];
     private volatile bool _monitorChanged;
     private byte[] _lastFrameHash = [];
+    private int _frameCount;
 
     public ChannelReader<Frame> FrameReader => _frameChannel.Reader;
     public int CaptureWidth => _captureWidth;
@@ -122,6 +123,7 @@ public sealed class GdiScreenCapture : IScreenCapture
                 }
 
                 _lastFrameHash = currentHash;
+                _frameCount++;
                 await _frameChannel.Writer.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
 
                 if (_frameCount <= 3 || _frameCount % 300 == 0)
