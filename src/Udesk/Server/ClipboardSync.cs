@@ -14,6 +14,11 @@ public sealed class ClipboardSync
     private string _lastClipboardText = string.Empty;
     private readonly object _lock = new();
 
+    /// <summary>
+    /// Raised when the host clipboard changes (polled by CaptureHostedService).
+    /// </summary>
+    public event Action<string>? ClipboardChanged;
+
     public ClipboardSync(ILogger<ClipboardSync> logger)
     {
         _logger = logger;
@@ -34,6 +39,7 @@ public sealed class ClipboardSync
             {
                 if (text == _lastClipboardText) return null;
                 _lastClipboardText = text;
+                ClipboardChanged?.Invoke(text);
                 return text;
             }
         }

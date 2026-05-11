@@ -28,6 +28,16 @@ public interface IScreenCapture : IDisposable
     int ScreenHeight { get; }
 
     /// <summary>
+    /// Gets the capture width in pixels (after scaling).
+    /// </summary>
+    int CaptureWidth { get; }
+
+    /// <summary>
+    /// Gets the capture height in pixels (after scaling).
+    /// </summary>
+    int CaptureHeight { get; }
+
+    /// <summary>
     /// Gets the list of available monitors.
     /// </summary>
     IReadOnlyList<MonitorInfo> Monitors { get; }

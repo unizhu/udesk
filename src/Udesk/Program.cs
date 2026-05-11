@@ -1,5 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Udesk.Capture;
 using Udesk.Input;
 using Udesk.LockScreen;
@@ -12,6 +10,7 @@ namespace Udesk;
 /// Udesk — lightweight remote desktop for Windows.
 /// No admin privileges, no drivers, no external dependencies.
 /// Browser-based viewer (Safari/Chrome on macOS).
+/// Uses Kestrel (raw TCP sockets) — binds 0.0.0.0 without admin.
 /// </summary>
 public static class Program
 {
@@ -25,73 +24,108 @@ public static class Program
         Console.WriteLine($"Monitor: {(options.MonitorIndex?.ToString() ?? "primary")}");
         Console.WriteLine();
 
-        using var host = Host.CreateDefaultBuilder(args)
-            .ConfigureServices((_, services) =>
-            {
-                services.AddSingleton(options);
-                services.AddSingleton<IScreenCapture>(sp =>
-                    new GdiScreenCapture(
-                        options.Fps,
-                        options.JpegQuality,
-                        options.ScaleFactor,
-                        sp.GetRequiredService<ILogger<GdiScreenCapture>>(),
-                        options.MonitorIndex));
-                services.AddSingleton<IInputController, SendInputController>();
-                services.AddSingleton<IAuthProvider>(sp =>
-                    new PinAuthProvider(
-                        options.Pin,
-                        sp.GetRequiredService<ILogger<PinAuthProvider>>()));
-                services.AddSingleton<SleepPreventer>();
-                services.AddSingleton<CredentialStore>();
-                services.AddSingleton<LockScreenDetector>();
-                services.AddSingleton<TlsCertificateManager>();
-                services.AddSingleton<ClipboardSync>();
-                services.AddSingleton<ILockScreenHandler>(sp =>
-                    new SasUnlockHandler(
-                        sp.GetRequiredService<IInputController>(),
-                        sp.GetRequiredService<CredentialStore>(),
-                        sp.GetRequiredService<ILogger<SasUnlockHandler>>()));
-                services.AddSingleton<UdeskServer>(sp =>
-                    new UdeskServer(
-                        sp.GetRequiredService<IScreenCapture>(),
-                        sp.GetRequiredService<IInputController>(),
-                        sp.GetRequiredService<IAuthProvider>(),
-                        sp.GetRequiredService<UdeskOptions>(),
-                        sp.GetRequiredService<SleepPreventer>(),
-                        sp.GetRequiredService<LockScreenDetector>(),
-                        sp.GetRequiredService<ILockScreenHandler>(),
-                        options.EnableTls ? sp.GetRequiredService<TlsCertificateManager>() : null,
-                        sp.GetRequiredService<ClipboardSync>(),
-                        sp.GetRequiredService<ILogger<UdeskServer>>()));
-                services.AddHostedService<UdeskHostedService>();
-            })
-            .ConfigureLogging(builder =>
-            {
-                builder.SetMinimumLevel(LogLevel.Information);
-            })
-            .Build();
+        // Pass empty args to avoid ASP.NET Core parsing our custom flags
+        var builder = WebApplication.CreateBuilder(Array.Empty<string>());
 
-        var logger = host.Services.GetRequiredService<ILogger<UdeskHostedService>>();
-        logger.LogInformation("Udesk starting on port {Port}, FPS: {Fps}, Quality: {Quality}%",
-            options.Port, options.Fps, options.JpegQuality);
+        // Suppress default ASP.NET Core logging noise
+        builder.Logging.SetMinimumLevel(LogLevel.Information);
+        builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.Hosting", LogLevel.Warning);
 
-        if (options.Pin is not null)
+        // Configure Kestrel — bind 0.0.0.0 (all interfaces, no admin needed)
+        builder.WebHost.ConfigureKestrel(kestrelOptions =>
         {
-            logger.LogInformation("PIN protection enabled");
-        }
+            kestrelOptions.Listen(System.Net.IPAddress.Any, options.Port, listenOptions =>
+            {
+                if (options.EnableTls)
+                {
+                    var certManager = new TlsCertificateManager(
+                        LoggerFactory.Create(b => b.AddConsole()).CreateLogger<TlsCertificateManager>());
+                    var cert = certManager.GetOrCreateCertificate();
+                    if (cert is not null)
+                        listenOptions.UseHttps(cert);
+                }
+            });
+        });
 
-        if (options.EnableTls)
+        // Register services
+        builder.Services.AddSingleton(options);
+        builder.Services.AddSingleton<IScreenCapture>(sp =>
+            new GdiScreenCapture(
+                options.Fps,
+                options.JpegQuality,
+                options.ScaleFactor,
+                sp.GetRequiredService<ILogger<GdiScreenCapture>>(),
+                options.MonitorIndex));
+        builder.Services.AddSingleton<IInputController, SendInputController>();
+        builder.Services.AddSingleton<IAuthProvider>(sp =>
+            new PinAuthProvider(
+                options.Pin,
+                sp.GetRequiredService<ILogger<PinAuthProvider>>()));
+        builder.Services.AddSingleton<SleepPreventer>();
+        builder.Services.AddSingleton<CredentialStore>();
+        builder.Services.AddSingleton<LockScreenDetector>();
+        builder.Services.AddSingleton<TlsCertificateManager>();
+        builder.Services.AddSingleton<ClipboardSync>();
+        builder.Services.AddSingleton<ILockScreenHandler>(sp =>
+            new SasUnlockHandler(
+                sp.GetRequiredService<IInputController>(),
+                sp.GetRequiredService<CredentialStore>(),
+                sp.GetRequiredService<ILogger<SasUnlockHandler>>()));
+        builder.Services.AddSingleton<UdeskHub>();
+        builder.Services.AddHostedService<CaptureHostedService>();
+
+        var app = builder.Build();
+
+        // WebSocket middleware
+        app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
+
+        // Serve viewer HTML page
+        app.MapGet("/", (HttpContext context) =>
         {
-            logger.LogInformation("TLS enabled with self-signed certificate");
-        }
+            var html = EmbeddedResources.GetViewerHtml();
+            return Results.Bytes(html, "text/html", Encoding.UTF8);
+        });
+
+        // Serve TLS certificate for download
+        app.MapGet("/cert.pem", (HttpContext context) =>
+        {
+            if (!options.EnableTls) return Results.NotFound();
+            var certManager = context.RequestServices.GetRequiredService<TlsCertificateManager>();
+            var pem = certManager.GetCertificatePem();
+            return Results.Text(pem ?? "", "application/x-pem-file");
+        });
+
+        // WebSocket endpoint
+        app.Map("/ws", async (HttpContext context) =>
+        {
+            if (!context.WebSockets.IsWebSocketRequest)
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+
+            var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+            var hub = context.RequestServices.GetRequiredService<UdeskHub>();
+            await hub.HandleConnectionAsync(webSocket, context.RequestAborted);
+        });
+
+        var listenUrl = $"{(options.EnableTls ? "https" : "http")}://0.0.0.0:{options.Port}/";
+        Console.WriteLine($"Binding to: {listenUrl}");
+        Console.WriteLine();
+        Console.WriteLine($"Udesk ready — open {(options.EnableTls ? "https" : "http")}://<windows-ip>:{options.Port}/ in your browser");
+        Console.WriteLine("Press Ctrl+C to stop");
+        Console.WriteLine();
 
         try
         {
-            await host.RunAsync().ConfigureAwait(false);
+            await app.RunAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            logger.LogCritical(ex, "Udesk terminated unexpectedly");
+            Console.WriteLine($"[FATAL] {ex.GetType().Name}: {ex.Message}");
+            if (ex.InnerException is not null)
+                Console.WriteLine($"[FATAL] Inner: {ex.InnerException.Message}");
             return 1;
         }
 

@@ -25,6 +25,8 @@ public sealed class GdiScreenCapture : IScreenCapture
     private byte[] _lastFrameHash = [];
 
     public ChannelReader<Frame> FrameReader => _frameChannel.Reader;
+    public int CaptureWidth => _captureWidth;
+    public int CaptureHeight => _captureHeight;
     public int ScreenWidth { get; private set; }
     public int ScreenHeight { get; private set; }
     public IReadOnlyList<MonitorInfo> Monitors => _monitors.AsReadOnly();
