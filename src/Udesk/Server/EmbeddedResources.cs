@@ -46,7 +46,7 @@ body { background: #000; color: #fff; font-family: 'Segoe UI', -apple-system, Bl
 #pin-hint { color: #888; margin-top: 20px; font-size: 13px; }
 @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
 
-canvas { max-width: 100vw; max-height: calc(100vh - 40px); cursor: default; image-rendering: auto; display: block; }
+canvas { cursor: default; image-rendering: auto; display: block; background: #000; }
 
 /* Lock screen overlay - also Windows style */
 #lock-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; align-items: center; justify-content: center; z-index: 90; flex-direction: column; }
@@ -120,6 +120,20 @@ canvas { max-width: 100vw; max-height: calc(100vh - 40px); cursor: default; imag
   let screenW = 0, screenH = 0;  // native screen resolution
   let captureW = 0, captureH = 0; // capture resolution (scaled)
   let frameCount = 0;  // debug: count received frames
+
+  // Scale canvas to fill viewport while maintaining aspect ratio
+  function resizeCanvas() {
+    const cw = canvas.width;   // internal resolution (capture size)
+    const ch = canvas.height;
+    if (cw === 0 || ch === 0) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight - 40; // reserve space for status bar
+    const scale = Math.min(vw / cw, vh / ch);
+    canvas.style.width = Math.round(cw * scale) + 'px';
+    canvas.style.height = Math.round(ch * scale) + 'px';
+  }
+  window.addEventListener('resize', resizeCanvas);
+  new MutationObserver(resizeCanvas).observe(canvas, { attributes: true, attributeFilter: ['width', 'height'] });
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';

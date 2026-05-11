@@ -15,7 +15,7 @@ public sealed record UdeskOptions
     public int JpegQuality { get; init; } = 40;
 
     /// <summary>Scale factor for captured frames (default 0.5 = 50%).</summary>
-    public double ScaleFactor { get; init; } = 0.5;
+    public double ScaleFactor { get; init; } = 1.0;
 
     /// <summary>Optional PIN code for viewer authentication. Null = no PIN required.</summary>
     public string? Pin { get; init; }
