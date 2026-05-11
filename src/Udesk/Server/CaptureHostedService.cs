@@ -34,10 +34,10 @@ public sealed class CaptureHostedService : BackgroundService
 
         try
         {
-            // Start the capture pipeline
-            await _capture.StartAsync(stoppingToken);
+            // Start the capture pipeline in the background (it writes frames to the channel)
+            var captureTask = _capture.StartAsync(stoppingToken);
 
-            // Read frames from the channel and broadcast
+            // Read frames from the channel and broadcast — runs concurrently with capture
             await foreach (var frame in _capture.FrameReader.ReadAllAsync(stoppingToken))
             {
                 // Poll clipboard every ~10 frames
@@ -55,6 +55,9 @@ public sealed class CaptureHostedService : BackgroundService
                 if (_hub.ViewerCount is 0) continue;
                 _hub.BroadcastFrame(frame.Data);
             }
+
+            // Wait for capture to finish cleanly
+            await captureTask;
         }
         catch (OperationCanceledException)
         {
