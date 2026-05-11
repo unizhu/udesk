@@ -24,11 +24,19 @@ public sealed class SendInputController : IInputController
         RefreshScreenDimensions();
     }
 
+    private int _moveCount;
+
     /// <inheritdoc />
     public void MouseMove(int x, int y)
     {
         // Use absolute positioning via SendInput for consistency
         var (normX, normY) = Normalize(x, y);
+        var count = Interlocked.Increment(ref _moveCount);
+        if (count <= 5 || count % 500 == 0)
+        {
+            _logger.LogInformation("MouseMove: screen({X},{Y}) → norm({NormX},{NormY}), screenSize={W}x{H}",
+                x, y, normX, normY, _screenWidth, _screenHeight);
+        }
         var input = new INPUT
         {
             type = InputType.MOUSE,

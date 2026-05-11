@@ -108,9 +108,18 @@ public sealed class UdeskHub : IDisposable
     /// <summary>
     /// Broadcasts a JPEG frame to all authenticated viewers.
     /// </summary>
+    private int _broadcastFrameCount;
+
     public void BroadcastFrame(byte[] frameData)
     {
         if (_viewers.IsEmpty) return;
+
+        var count = Interlocked.Increment(ref _broadcastFrameCount);
+        if (count <= 3 || count % 300 == 0)
+        {
+            _logger.LogInformation("Broadcasting frame #{Count} ({Size} bytes) to {Viewers} viewer(s)",
+                count, frameData.Length, _viewers.Count);
+        }
 
         foreach (var kvp in _viewers)
         {

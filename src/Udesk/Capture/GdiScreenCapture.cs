@@ -124,6 +124,12 @@ public sealed class GdiScreenCapture : IScreenCapture
                 _lastFrameHash = currentHash;
                 await _frameChannel.Writer.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
 
+                if (_frameCount <= 3 || _frameCount % 300 == 0)
+                {
+                    _logger.LogInformation("Frame #{Count} captured: {Width}x{Height}, {Size} bytes",
+                        _frameCount, frame.Width, frame.Height, frame.Data.Length);
+                }
+
                 var delayMs = Math.Max(0, intervalMs - (int)sw.ElapsedMilliseconds);
                 if (delayMs > 0)
                 {

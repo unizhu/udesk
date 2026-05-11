@@ -2,7 +2,8 @@ namespace Udesk.Interop;
 
 /// <summary>
 /// P/Invoke declarations for Win32 native methods.
-/// Uses LibraryImport (source-generated) for AOT compatibility.
+/// Uses DllImport for SendInput (struct arrays with explicit layout),
+/// and LibraryImport (source-generated) for simpler calls.
 /// </summary>
 internal static partial class NativeMethods
 {
@@ -12,8 +13,8 @@ internal static partial class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool SetCursorPos(int x, int y);
 
-    [LibraryImport("user32.dll", SetLastError = true)]
-    internal static partial uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
     [LibraryImport("user32.dll")]
     internal static partial int GetSystemMetrics(int nIndex);

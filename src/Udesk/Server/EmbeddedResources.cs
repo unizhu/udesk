@@ -119,6 +119,7 @@ canvas { max-width: 100vw; max-height: calc(100vh - 40px); cursor: default; imag
   let savedPin = '';
   let screenW = 0, screenH = 0;  // native screen resolution
   let captureW = 0, captureH = 0; // capture resolution (scaled)
+  let frameCount = 0;  // debug: count received frames
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -136,16 +137,36 @@ canvas { max-width: 100vw; max-height: calc(100vh - 40px); cursor: default; imag
     ws.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) {
         // Binary = JPEG frame
+        frameCount++;
+        if (frameCount <= 3 || frameCount % 100 === 0) {
+          console.log('Frame #' + frameCount + ': ' + e.data.byteLength + ' bytes');
+        }
         const blob = new Blob([e.data], { type: 'image/jpeg' });
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload = () => {
-          canvas.width = img.width;
-          canvas.height = img.height;
-          ctx.drawImage(img, 0, 0);
-          URL.revokeObjectURL(url);
-        };
-        img.src = url;
+        createImageBitmap(blob).then(bmp => {
+          // Set canvas size to capture resolution only when it changes
+          if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+            canvas.width = bmp.width;
+            canvas.height = bmp.height;
+          }
+          ctx.drawImage(bmp, 0, 0);
+          bmp.close();
+          statusEl.textContent = 'Connected — ' + canvas.width + 'x' + canvas.height + ' #' + frameCount;
+        }).catch(err => {
+          // Fallback: use Image + Blob URL
+          console.warn('createImageBitmap failed, using fallback:', err);
+          const url = URL.createObjectURL(blob);
+          const img = new Image();
+          img.onload = () => {
+            if (canvas.width !== img.width || canvas.height !== img.height) {
+              canvas.width = img.width;
+              canvas.height = img.height;
+            }
+            ctx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(url);
+            statusEl.textContent = 'Connected — ' + canvas.width + 'x' + canvas.height + ' #' + frameCount;
+          };
+          img.src = url;
+        });
       } else {
         const msg = JSON.parse(e.data);
         handleMessage(msg);
