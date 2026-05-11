@@ -24,6 +24,7 @@ public sealed class GdiScreenCapture : IScreenCapture
     private volatile bool _monitorChanged;
     private byte[] _lastFrameHash = [];
     private int _frameCount;
+    private volatile bool _forceNextFrame;
 
     public ChannelReader<Frame> FrameReader => _frameChannel.Reader;
     public int CaptureWidth => _captureWidth;
@@ -83,6 +84,12 @@ public sealed class GdiScreenCapture : IScreenCapture
     }
 
     /// <inheritdoc />
+    public void ForceNextFrame()
+    {
+        _forceNextFrame = true;
+    }
+
+    /// <inheritdoc />
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         UpdateScreenDimensions();
@@ -113,8 +120,11 @@ public sealed class GdiScreenCapture : IScreenCapture
                 var frame = FrameFromBitmap(bitmap);
 
                 // Frame diffing: skip identical frames to save bandwidth
+                // But force send if a new viewer connected (ForceNextFrame was called)
                 var currentHash = ComputeHash(frame.Data);
-                if (HashEquals(currentHash, _lastFrameHash))
+                var force = _forceNextFrame;
+                if (force) _forceNextFrame = false;
+                if (!force && HashEquals(currentHash, _lastFrameHash))
                 {
                     // Frame unchanged, skip sending
                     var skipMs = Math.Max(0, intervalMs - (int)sw.ElapsedMilliseconds);
@@ -124,6 +134,7 @@ public sealed class GdiScreenCapture : IScreenCapture
 
                 _lastFrameHash = currentHash;
                 _frameCount++;
+                if (force) _logger.LogInformation("Force-sending frame #{Count} for new viewer", _frameCount);
                 await _frameChannel.Writer.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
 
                 if (_frameCount <= 3 || _frameCount % 300 == 0)

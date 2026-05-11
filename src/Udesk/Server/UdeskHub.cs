@@ -77,6 +77,9 @@ public sealed class UdeskHub : IDisposable
             // Welcome
             await SendWelcomeAsync(viewer, cancellationToken);
 
+            // Force next frame so the new viewer gets an immediate screen update
+            _capture.ForceNextFrame();
+
             // Message loop
             await ReceiveLoopAsync(viewer, buffer, cancellationToken);
         }

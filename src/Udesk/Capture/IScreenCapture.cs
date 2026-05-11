@@ -52,4 +52,10 @@ public interface IScreenCapture : IDisposable
     /// </summary>
     /// <param name="monitorIndex">Zero-based monitor index.</param>
     void SwitchMonitor(int monitorIndex);
+
+    /// <summary>
+    /// Forces the next frame to be sent even if the screen hasn't changed.
+    /// Call this when a new viewer connects so they get an initial frame.
+    /// </summary>
+    void ForceNextFrame();
 }
