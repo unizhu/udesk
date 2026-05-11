@@ -71,11 +71,33 @@ public sealed class UdeskServer : IDisposable
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var scheme = _options.EnableTls ? "https" : "http";
-        var prefix = $"{scheme}://+:{_options.Port}/";
-        _httpListener.Prefixes.Clear();
-        _httpListener.Prefixes.Add(prefix);
+        var wildcardPrefix = $"{scheme}://+:{_options.Port}/";
+        var localhostPrefix = $"{scheme}://localhost:{_options.Port}/";
 
-        _httpListener.Start();
+        // Try wildcard (LAN access) first, fall back to localhost (loopback only)
+        _httpListener.Prefixes.Clear();
+        _httpListener.Prefixes.Add(wildcardPrefix);
+
+        try
+        {
+            _httpListener.Start();
+        }
+        catch (HttpListenerException)
+        {
+            // Wildcard requires admin or netsh urlacl — fall back to localhost
+            _httpListener.Prefixes.Clear();
+            _httpListener.Prefixes.Add(localhostPrefix);
+            try
+            {
+                _httpListener.Start();
+            }
+            catch (HttpListenerException ex2)
+            {
+                _logger.LogCritical(ex2, "Failed to start server on port {Port}. Port may be in use.", _options.Port);
+                throw;
+            }
+            _logger.LogWarning("Running without admin: listening on localhost only (loopback). For LAN access, run as admin or: netsh http add urlacl url={Prefix} user=Everyone", wildcardPrefix);
+        }
 
         _serverCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
