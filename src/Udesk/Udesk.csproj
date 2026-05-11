@@ -12,6 +12,7 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon />
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>

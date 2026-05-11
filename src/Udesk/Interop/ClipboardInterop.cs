@@ -5,7 +5,7 @@ namespace Udesk.Interop;
 /// <summary>
 /// Win32 clipboard API interop for text clipboard synchronization.
 /// </summary>
-public static class ClipboardInterop
+public static partial class ClipboardInterop
 {
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
