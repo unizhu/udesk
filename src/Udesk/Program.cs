@@ -3,6 +3,7 @@ using Udesk.Input;
 using Udesk.LockScreen;
 using Udesk.Security;
 using Udesk.Server;
+using System.Text;
 
 namespace Udesk;
 
