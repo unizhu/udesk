@@ -156,11 +156,14 @@ canvas { max-width: 100vw; max-height: calc(100vh - 40px); cursor: default; imag
       statusEl.textContent = 'Disconnected. Reconnecting...';
       statusEl.className = 'disconnected';
       if (needsPin) {
+        // DON'T auto-reconnect — wait for user to enter PIN and submit
         pinOverlay.style.display = 'flex';
         pinError.style.display = 'none';
         pinInput.focus();
+      } else {
+        // No PIN required, auto-reconnect after 3 seconds
+        setTimeout(connect, 3000);
       }
-      setTimeout(connect, 3000);
     };
 
     ws.onerror = () => {};

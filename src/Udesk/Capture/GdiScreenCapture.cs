@@ -134,6 +134,14 @@ public sealed class GdiScreenCapture : IScreenCapture
             {
                 break;
             }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                // Handle is invalid (error 6) — screen locked, blanked, or secure desktop active.
+                // This is transient; retry without spamming error logs.
+                _logger.LogDebug(ex, "Screen capture temporarily unavailable (handle invalid), retrying...");
+                _lastFrameHash = []; // Force send next frame once screen returns
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error capturing screen frame");

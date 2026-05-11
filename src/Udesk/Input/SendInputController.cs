@@ -6,30 +6,53 @@ namespace Udesk.Input;
 
 /// <summary>
 /// Input controller using Win32 SendInput for mouse and keyboard simulation.
+/// Uses MOUSEEVENTF_ABSOLUTE for reliable mouse positioning.
 /// Runs in user mode — no admin privileges required.
 /// </summary>
 public sealed class SendInputController : IInputController
 {
     private readonly ILogger<SendInputController> _logger;
 
+    // Cache screen dimensions for coordinate normalization
+    private int _screenWidth;
+    private int _screenHeight;
+    private DateTime _lastScreenCheck;
+
     public SendInputController(ILogger<SendInputController> logger)
     {
         _logger = logger;
+        RefreshScreenDimensions();
     }
 
     /// <inheritdoc />
     public void MouseMove(int x, int y)
     {
-        if (!NativeMethods.SetCursorPos(x, y))
+        // Use absolute positioning via SendInput for consistency
+        var (normX, normY) = Normalize(x, y);
+        var input = new INPUT
         {
-            _logger.LogWarning("SetCursorPos failed for ({X}, {Y})", x, y);
-        }
+            type = InputType.MOUSE,
+            Data = new InputUnion
+            {
+                mi = new MOUSEINPUT
+                {
+                    dx = normX,
+                    dy = normY,
+                    mouseData = 0,
+                    dwFlags = MouseFlags.MOVE | MouseFlags.ABSOLUTE,
+                    time = 0,
+                    dwExtraInfo = IntPtr.Zero,
+                }
+            }
+        };
+
+        SendSingleInput(input);
     }
 
     /// <inheritdoc />
     public void MouseClick(int x, int y, string button, string action)
     {
-        // First move to position
+        // Move to position first
         MouseMove(x, y);
 
         var flags = button.ToLowerInvariant() switch
@@ -121,32 +144,26 @@ public sealed class SendInputController : IInputController
     {
         var upper = char.ToUpperInvariant(ch);
         var vk = (ushort)upper;
-        var needsShift = ch != upper; // lowercase letters need shift check via actual char
 
-        // Check if this character requires Shift to be held
         if (IsShiftRequired(ch))
         {
-            // Press Shift
             SendSingleInput(CreateKeyboardInput(VirtualKeyCodes.VK_SHIFT, KeyboardFlags.KEYDOWN));
         }
 
-        // Press and release the key
         SendSingleInput(CreateKeyboardInput(vk, KeyboardFlags.KEYDOWN));
-        Thread.Sleep(10); // Small delay between down and up
+        Thread.Sleep(10);
         SendSingleInput(CreateKeyboardInput(vk, KeyboardFlags.KEYUP));
 
         if (IsShiftRequired(ch))
         {
-            // Release Shift
             SendSingleInput(CreateKeyboardInput(VirtualKeyCodes.VK_SHIFT, KeyboardFlags.KEYUP));
         }
     }
 
     private static bool IsShiftRequired(char ch)
     {
-        // Characters that need Shift to type on a standard US keyboard
         return ch is '~' or '!' or '@' or '#' or '$' or '%' or '^' or '&' or '*' or '('
-            or ')' or '_' or '+' or '{' or '}' or '|' or ':' or '"' or '<' or '>' or '?'
+            or ')' or '_' or '+' or '{' or '}' or '|' or ':' or '\"' or '<' or '>' or '?'
             || (ch is >= 'A' and <= 'Z');
     }
 
@@ -167,6 +184,37 @@ public sealed class SendInputController : IInputController
                 }
             }
         };
+    }
+
+    /// <summary>
+    /// Normalizes screen pixel coordinates to absolute coordinates (0-65535).
+    /// SendInput with MOUSEEVENTF_ABSOLUTE uses this range.
+    /// </summary>
+    private (int normX, int normY) Normalize(int x, int y)
+    {
+        RefreshScreenDimensions();
+
+        // Per MSDN: dx = (x * 65535) / (screenWidth - 1)
+        var normX = _screenWidth > 1 ? (int)((long)x * 65535 / (_screenWidth - 1)) : 0;
+        var normY = _screenHeight > 1 ? (int)((long)y * 65535 / (_screenHeight - 1)) : 0;
+
+        normX = Math.Clamp(normX, 0, 65535);
+        normY = Math.Clamp(normY, 0, 65535);
+
+        return (normX, normY);
+    }
+
+    /// <summary>
+    /// Refreshes cached screen dimensions periodically (every 5 seconds).
+    /// Avoids calling GetSystemMetrics on every mouse event.
+    /// </summary>
+    private void RefreshScreenDimensions()
+    {
+        if ((DateTime.UtcNow - _lastScreenCheck).TotalSeconds < 5) return;
+
+        _screenWidth = NativeMethods.GetSystemMetrics(SystemMetrics.SM_CXSCREEN);
+        _screenHeight = NativeMethods.GetSystemMetrics(SystemMetrics.SM_CYSCREEN);
+        _lastScreenCheck = DateTime.UtcNow;
     }
 
     private void SendSingleInput(INPUT input)
