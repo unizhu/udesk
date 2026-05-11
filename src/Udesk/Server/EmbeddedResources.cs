@@ -51,6 +51,9 @@ canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; im
 </head>
 <body>
 <div id="status" class="disconnected">Connecting...</div>
+<div id="monitor-bar" style="display:none; background:#16213e; padding:4px 8px; text-align:center; font-size:13px;">
+  Monitor: <select id="monitor-select" style="background:#1a1a2e; color:#eee; border:1px solid #0f3460; border-radius:4px; padding:2px 8px; font-size:13px;"></select>
+</div>
 <div id="pin-overlay" style="display:none">
   <div id="pin-box">
     <h2>🔒 Enter PIN</h2>
@@ -144,6 +147,7 @@ canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; im
         pinOverlay.style.display = 'none';
         lastPin = pinInput.value;
         needsPin = false;
+        updateMonitorSelector(msg.monitors, msg.activeMonitorIndex);
         break;
       case 'auth_failed':
         needsPin = true;
@@ -172,6 +176,16 @@ canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; im
           if (!msg.hasCredential) {
             showCredInput();
           }
+        }
+        break;
+      case 'monitor_changed':
+        statusEl.textContent = 'Connected — ' + msg.captureWidth + 'x' + msg.captureHeight + ' (Monitor ' + (msg.activeMonitorIndex + 1) + ')';
+        updateMonitorSelector(null, msg.activeMonitorIndex);
+        break;
+      case 'clipboard':
+        // Sync host clipboard to viewer (write to local clipboard silently)
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(msg.text).catch(() => {});
         }
         break;
     }
@@ -221,6 +235,14 @@ canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; im
   // Keyboard events
   document.addEventListener('keydown', (e) => {
     if (e.target === pinInput) return;
+    // Clipboard sync: Ctrl+V — send viewer clipboard to host
+    if (e.ctrlKey && e.key === 'v') {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(text => {
+          if (text) send({ type: 'clipboard', text: text });
+        }).catch(() => {});
+      }
+    }
     e.preventDefault();
     send({ type: 'keyboard', keyCode: e.keyCode, action: 'down' });
   });
@@ -289,6 +311,29 @@ canvas { max-width: 100vw; max-height: calc(100vh - 50px); cursor: crosshair; im
     document.getElementById('cred-section').style.display = 'block';
     document.getElementById('cred-input').focus();
   }
+
+  function updateMonitorSelector(monitors, activeIndex) {
+    const select = document.getElementById('monitor-select');
+    const bar = document.getElementById('monitor-bar');
+    if (monitors && monitors.length > 1) {
+      select.innerHTML = '';
+      monitors.forEach((m, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = (i + 1) + '. ' + m.name + ' (' + m.width + 'x' + m.height + (m.isPrimary ? ' ★' : '') + ')';
+        if (i === activeIndex) opt.selected = true;
+        select.appendChild(opt);
+      });
+      bar.style.display = 'block';
+    } else if (monitors && monitors.length <= 1) {
+      bar.style.display = 'none';
+    }
+    select.value = activeIndex;
+  }
+
+  document.getElementById('monitor-select').addEventListener('change', (e) => {
+    send({ type: 'switch_monitor', monitorIndex: parseInt(e.target.value) });
+  });
 
   // Auto-connect; if server requires PIN, overlay will show after auth_failed
   connect();

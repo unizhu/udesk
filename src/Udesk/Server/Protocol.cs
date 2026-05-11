@@ -1,3 +1,5 @@
+using Udesk.Capture;
+
 namespace Udesk.Server;
 
 /// <summary>
@@ -19,6 +21,8 @@ internal static class Protocol
         public required int ScreenHeight { get; init; }
         public required int CaptureWidth { get; init; }
         public required int CaptureHeight { get; init; }
+        public required int ActiveMonitorIndex { get; init; }
+        public required List<MonitorInfo> Monitors { get; init; }
     }
 
     /// <summary>
@@ -118,5 +122,47 @@ internal static class Protocol
     {
         public string Type => "store_credential";
         public required string Credential { get; init; }
+    }
+
+    /// <summary>
+    /// Request to switch the active monitor.
+    /// </summary>
+    public sealed class SwitchMonitorRequest
+    {
+        public string Type => "switch_monitor";
+        public required int MonitorIndex { get; init; }
+    }
+
+    /// <summary>
+    /// Sent to all viewers when the active monitor changes.
+    /// </summary>
+    public sealed class MonitorChangedMessage
+    {
+        public string Type => "monitor_changed";
+        public required int ActiveMonitorIndex { get; init; }
+        public required int ScreenWidth { get; init; }
+        public required int ScreenHeight { get; init; }
+        public required int CaptureWidth { get; init; }
+        public required int CaptureHeight { get; init; }
+    }
+
+    // === Clipboard messages ===
+
+    /// <summary>
+    /// Server → Viewer: clipboard content from the host.
+    /// </summary>
+    public sealed class ClipboardMessage
+    {
+        public string Type => "clipboard";
+        public required string Text { get; init; }
+    }
+
+    /// <summary>
+    /// Viewer → Server: clipboard content from the viewer.
+    /// </summary>
+    public sealed class ClipboardUpdateRequest
+    {
+        public string Type => "clipboard";
+        public required string Text { get; init; }
     }
 }

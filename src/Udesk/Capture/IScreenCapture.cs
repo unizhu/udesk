@@ -26,4 +26,20 @@ public interface IScreenCapture : IDisposable
     /// Gets the current screen height in pixels (native, before resize).
     /// </summary>
     int ScreenHeight { get; }
+
+    /// <summary>
+    /// Gets the list of available monitors.
+    /// </summary>
+    IReadOnlyList<MonitorInfo> Monitors { get; }
+
+    /// <summary>
+    /// Gets the index of the currently captured monitor.
+    /// </summary>
+    int ActiveMonitorIndex { get; }
+
+    /// <summary>
+    /// Switches capture to a different monitor.
+    /// </summary>
+    /// <param name="monitorIndex">Zero-based monitor index.</param>
+    void SwitchMonitor(int monitorIndex);
 }

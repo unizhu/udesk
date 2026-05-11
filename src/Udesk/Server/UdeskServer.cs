@@ -25,6 +25,8 @@ public sealed class UdeskServer : IDisposable
     private readonly SleepPreventer _sleepPreventer;
     private readonly LockScreenDetector _lockDetector;
     private readonly ILockScreenHandler _lockHandler;
+    private readonly TlsCertificateManager? _tlsManager;
+    private readonly ClipboardSync _clipboardSync;
     private CancellationTokenSource? _serverCts;
     private bool _disposed;
     private bool _screenLocked;
@@ -43,6 +45,8 @@ public sealed class UdeskServer : IDisposable
         SleepPreventer sleepPreventer,
         LockScreenDetector lockDetector,
         ILockScreenHandler lockHandler,
+        TlsCertificateManager? tlsManager,
+        ClipboardSync clipboardSync,
         ILogger<UdeskServer> logger)
     {
         _capture = capture;
@@ -56,6 +60,8 @@ public sealed class UdeskServer : IDisposable
         // Wire lock state change to broadcast
         _lockDetector = lockDetector;
         _lockHandler = lockHandler;
+        _tlsManager = tlsManager;
+        _clipboardSync = clipboardSync;
         _lockDetector.LockStateChanged += OnLockStateChanged;
     }
 
@@ -64,19 +70,32 @@ public sealed class UdeskServer : IDisposable
     /// </summary>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var prefix = $"http://+:{_options.Port}/";
+        var scheme = _options.EnableTls ? "https" : "http";
+        var prefix = $"{scheme}://+:{_options.Port}/";
         _httpListener.Prefixes.Clear();
         _httpListener.Prefixes.Add(prefix);
+
         _httpListener.Start();
 
         _serverCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _logger.LogInformation("Udesk server listening on port {Port}", _options.Port);
+
+        if (_options.EnableTls)
+        {
+            _logger.LogInformation("Udesk server listening with TLS on port {Port}", _options.Port);
+        }
+        else
+        {
+            _logger.LogInformation("Udesk server listening on port {Port}", _options.Port);
+        }
 
         // Start frame broadcast loop
         var broadcastTask = BroadcastFramesAsync(_serverCts.Token);
 
         // Start lock screen polling (every 2 seconds)
         var lockPollTask = PollLockStateAsync(_serverCts.Token);
+
+        // Start clipboard polling (every 1 second)
+        var clipboardPollTask = PollClipboardAsync(_serverCts.Token);
 
         try
         {
@@ -100,7 +119,7 @@ public sealed class UdeskServer : IDisposable
         }
         finally
         {
-            await Task.WhenAll(broadcastTask, lockPollTask).ConfigureAwait(false);
+            await Task.WhenAll(broadcastTask, lockPollTask, clipboardPollTask).ConfigureAwait(false);
         }
     }
 
@@ -121,6 +140,10 @@ public sealed class UdeskServer : IDisposable
         {
             await ServeViewerPageAsync(context).ConfigureAwait(false);
         }
+        else if (path is "/cert.pem")
+        {
+            await ServeCertificateAsync(context).ConfigureAwait(false);
+        }
         else
         {
             context.Response.StatusCode = 404;
@@ -134,6 +157,25 @@ public sealed class UdeskServer : IDisposable
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.ContentLength64 = html.Length;
         await context.Response.OutputStream.WriteAsync(html, _serverCts?.Token ?? CancellationToken.None)
+            .ConfigureAwait(false);
+        context.Response.Close();
+    }
+
+    private async Task ServeCertificateAsync(HttpListenerContext context)
+    {
+        var pem = _tlsManager?.GetCertificatePem();
+        if (pem is null)
+        {
+            context.Response.StatusCode = 404;
+            context.Response.Close();
+            return;
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(pem);
+        context.Response.ContentType = "application/x-pem-file";
+        context.Response.ContentLength64 = bytes.Length;
+        context.Response.Headers.Add("Content-Disposition", "attachment; filename=udesk-cert.pem");
+        await context.Response.OutputStream.WriteAsync(bytes, _serverCts?.Token ?? CancellationToken.None)
             .ConfigureAwait(false);
         context.Response.Close();
     }
@@ -221,6 +263,8 @@ public sealed class UdeskServer : IDisposable
                         ScreenHeight = _capture.ScreenHeight,
                         CaptureWidth = (int)(_capture.ScreenWidth * _options.ScaleFactor),
                         CaptureHeight = (int)(_capture.ScreenHeight * _options.ScaleFactor),
+                        ActiveMonitorIndex = _capture.ActiveMonitorIndex,
+                        Monitors = _capture.Monitors.ToList()
                     };
                     await connection.SendTextAsync(
                         JsonSerializer.Serialize(welcome, JsonOptions), connection.CancellationToken).ConfigureAwait(false);
@@ -266,6 +310,30 @@ public sealed class UdeskServer : IDisposable
                 var credMsg = JsonSerializer.Deserialize<Protocol.StoreCredentialRequest>(json, jsonOptions);
                 if (credMsg is null) break;
                 await _lockHandler.StoreCredentialAsync(credMsg.Credential).ConfigureAwait(false);
+                break;
+
+            case "switch_monitor":
+                if (!connection.Authenticated) break;
+                var monMsg = JsonSerializer.Deserialize<Protocol.SwitchMonitorRequest>(json, jsonOptions);
+                if (monMsg is null) break;
+                _capture.SwitchMonitor(monMsg.MonitorIndex);
+                // Notify all viewers of the monitor change
+                var monChanged = new Protocol.MonitorChangedMessage
+                {
+                    ActiveMonitorIndex = _capture.ActiveMonitorIndex,
+                    ScreenWidth = _capture.ScreenWidth,
+                    ScreenHeight = _capture.ScreenHeight,
+                    CaptureWidth = (int)(_capture.ScreenWidth * _options.ScaleFactor),
+                    CaptureHeight = (int)(_capture.ScreenHeight * _options.ScaleFactor)
+                };
+                await BroadcastToAllAsync(JsonSerializer.Serialize(monChanged, JsonOptions), CancellationToken.None).ConfigureAwait(false);
+                break;
+
+            case "clipboard":
+                if (!connection.Authenticated) break;
+                var clipMsg = JsonSerializer.Deserialize<Protocol.ClipboardUpdateRequest>(json, jsonOptions);
+                if (clipMsg is null) break;
+                _clipboardSync.SetFromViewer(clipMsg.Text);
                 break;
         }
     }
@@ -340,6 +408,29 @@ public sealed class UdeskServer : IDisposable
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
                 _lockDetector.Poll();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown
+        }
+    }
+
+    private async Task PollClipboardAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (_viewers.IsEmpty) continue;
+
+                var changedText = _clipboardSync.PollClipboardChange();
+                if (changedText is null) continue;
+
+                var msg = new Protocol.ClipboardMessage { Text = changedText };
+                var json = JsonSerializer.Serialize(msg, JsonOptions);
+                await BroadcastToAllAsync(json, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)

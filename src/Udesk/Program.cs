@@ -28,7 +28,8 @@ public static class Program
                         options.Fps,
                         options.JpegQuality,
                         options.ScaleFactor,
-                        sp.GetRequiredService<ILogger<GdiScreenCapture>>()));
+                        sp.GetRequiredService<ILogger<GdiScreenCapture>>(),
+                        options.MonitorIndex));
                 services.AddSingleton<IInputController, SendInputController>();
                 services.AddSingleton<IAuthProvider>(sp =>
                     new PinAuthProvider(
@@ -37,12 +38,25 @@ public static class Program
                 services.AddSingleton<SleepPreventer>();
                 services.AddSingleton<CredentialStore>();
                 services.AddSingleton<LockScreenDetector>();
+                services.AddSingleton<TlsCertificateManager>();
+                services.AddSingleton<ClipboardSync>();
                 services.AddSingleton<ILockScreenHandler>(sp =>
                     new SasUnlockHandler(
                         sp.GetRequiredService<IInputController>(),
                         sp.GetRequiredService<CredentialStore>(),
                         sp.GetRequiredService<ILogger<SasUnlockHandler>>()));
-                services.AddSingleton<UdeskServer>();
+                services.AddSingleton<UdeskServer>(sp =>
+                    new UdeskServer(
+                        sp.GetRequiredService<IScreenCapture>(),
+                        sp.GetRequiredService<IInputController>(),
+                        sp.GetRequiredService<IAuthProvider>(),
+                        sp.GetRequiredService<UdeskOptions>(),
+                        sp.GetRequiredService<SleepPreventer>(),
+                        sp.GetRequiredService<LockScreenDetector>(),
+                        sp.GetRequiredService<ILockScreenHandler>(),
+                        options.EnableTls ? sp.GetRequiredService<TlsCertificateManager>() : null,
+                        sp.GetRequiredService<ClipboardSync>(),
+                        sp.GetRequiredService<ILogger<UdeskServer>>()));
                 services.AddHostedService<UdeskHostedService>();
             })
             .ConfigureLogging(builder =>
@@ -58,6 +72,11 @@ public static class Program
         if (options.Pin is not null)
         {
             logger.LogInformation("PIN protection enabled");
+        }
+
+        if (options.EnableTls)
+        {
+            logger.LogInformation("TLS enabled with self-signed certificate");
         }
 
         try
@@ -101,6 +120,13 @@ public static class Program
                             options = options with { Pin = pin };
                     }
                     break;
+                case "--tls":
+                    options = options with { EnableTls = true };
+                    break;
+                case "--monitor":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out var mon))
+                        options = options with { MonitorIndex = mon };
+                    break;
                 case "--help" or "-h":
                     Console.WriteLine("Udesk — Lightweight Remote Desktop");
                     Console.WriteLine();
@@ -111,6 +137,8 @@ public static class Program
                     Console.WriteLine("  --fps, -f <fps>        Target frames per second (default: 5)");
                     Console.WriteLine("  --quality, -q <1-100>  JPEG quality (default: 40)");
                     Console.WriteLine("  --pin <4-8 digits>     Optional PIN for viewer authentication");
+                    Console.WriteLine("  --tls                  Enable HTTPS with self-signed certificate");
+                    Console.WriteLine("  --monitor <index>      Monitor index to capture (0-based)");
                     Console.WriteLine("  --help, -h             Show this help");
                     Environment.Exit(0);
                     break;

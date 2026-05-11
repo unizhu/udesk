@@ -19,4 +19,10 @@ public sealed class UdeskOptions
 
     /// <summary>Optional PIN code for viewer authentication. Null = no PIN required.</summary>
     public string? Pin { get; init; }
+
+    /// <summary>Enable TLS (HTTPS) with auto-generated self-signed certificate.</summary>
+    public bool EnableTls { get; init; }
+
+    /// <summary>Monitor index to capture (0-based). Null = primary monitor.</summary>
+    public int? MonitorIndex { get; init; }
 }
