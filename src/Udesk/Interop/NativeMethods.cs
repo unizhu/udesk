@@ -16,6 +16,10 @@ internal static partial class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
+    // Legacy mouse_event API — sometimes succeeds where SendInput is blocked by UIPI
+    [DllImport("user32.dll")]
+    internal static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, IntPtr dwExtraInfo);
+
     [LibraryImport("user32.dll")]
     internal static partial int GetSystemMetrics(int nIndex);
 

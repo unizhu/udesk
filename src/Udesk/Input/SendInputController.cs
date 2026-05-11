@@ -29,38 +29,45 @@ public sealed class SendInputController : IInputController
     /// <inheritdoc />
     public void MouseMove(int x, int y)
     {
-        // Use absolute positioning via SendInput for consistency
-        var (normX, normY) = Normalize(x, y);
         var count = Interlocked.Increment(ref _moveCount);
         if (count <= 5 || count % 500 == 0)
         {
-            _logger.LogInformation("MouseMove: screen({X},{Y}) → norm({NormX},{NormY}), screenSize={W}x{H}",
-                x, y, normX, normY, _screenWidth, _screenHeight);
+            _logger.LogInformation("MouseMove: screen({X},{Y}), screenSize={W}x{H}",
+                x, y, _screenWidth, _screenHeight);
         }
-        var input = new INPUT
-        {
-            type = InputType.MOUSE,
-            Data = new InputUnion
-            {
-                mi = new MOUSEINPUT
-                {
-                    dx = normX,
-                    dy = normY,
-                    mouseData = 0,
-                    dwFlags = MouseFlags.MOVE | MouseFlags.ABSOLUTE,
-                    time = 0,
-                    dwExtraInfo = IntPtr.Zero,
-                }
-            }
-        };
 
-        SendSingleInput(input);
+        // Use SetCursorPos for movement — it is NOT subject to UIPI and works
+        // regardless of which window is in the foreground. SendInput with
+        // MOUSEEVENTF_ABSOLUTE can be silently dropped by UIPI when a higher-
+        // integrity process owns the foreground window.
+        if (!NativeMethods.SetCursorPos(x, y))
+        {
+            // Fallback to SendInput if SetCursorPos fails (rare)
+            var (normX, normY) = Normalize(x, y);
+            var input = new INPUT
+            {
+                type = InputType.MOUSE,
+                Data = new InputUnion
+                {
+                    mi = new MOUSEINPUT
+                    {
+                        dx = normX,
+                        dy = normY,
+                        mouseData = 0,
+                        dwFlags = MouseFlags.MOVE | MouseFlags.ABSOLUTE,
+                        time = 0,
+                        dwExtraInfo = IntPtr.Zero,
+                    }
+                }
+            };
+            SendSingleInput(input);
+        }
     }
 
     /// <inheritdoc />
     public void MouseClick(int x, int y, string button, string action)
     {
-        // Move to position first
+        // Ensure cursor is at the target position first
         MouseMove(x, y);
 
         var flags = button.ToLowerInvariant() switch
@@ -71,6 +78,11 @@ public sealed class SendInputController : IInputController
             _ => action == "down" ? MouseFlags.LEFTDOWN : MouseFlags.LEFTUP,
         };
 
+        // For click events, use absolute coordinates AND the click flag together.
+        // Without ABSOLUTE, dx/dy are relative movements (0,0 = no move), but
+        // including ABSOLUTE ensures the click targets the exact position even
+        // if there was a race between SetCursorPos and the click event.
+        var (normX, normY) = Normalize(x, y);
         var input = new INPUT
         {
             type = InputType.MOUSE,
@@ -78,17 +90,24 @@ public sealed class SendInputController : IInputController
             {
                 mi = new MOUSEINPUT
                 {
-                    dx = 0,
-                    dy = 0,
+                    dx = normX,
+                    dy = normY,
                     mouseData = 0,
-                    dwFlags = flags,
+                    dwFlags = flags | MouseFlags.ABSOLUTE | MouseFlags.MOVE,
                     time = 0,
                     dwExtraInfo = IntPtr.Zero,
                 }
             }
         };
 
-        SendSingleInput(input);
+        var result = NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        if (result == 0)
+        {
+            // Fallback: use mouse_event which sometimes succeeds where
+            // SendInput is silently blocked by UIPI.
+            NativeMethods.mouse_event(flags | MouseFlags.ABSOLUTE | MouseFlags.MOVE,
+                normX, normY, 0, IntPtr.Zero);
+        }
     }
 
     /// <inheritdoc />
@@ -111,7 +130,12 @@ public sealed class SendInputController : IInputController
             }
         };
 
-        SendSingleInput(input);
+        var result = NativeMethods.SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        if (result == 0)
+        {
+            // Fallback to mouse_event for scroll
+            NativeMethods.mouse_event(MouseFlags.WHEEL, 0, 0, (uint)delta, IntPtr.Zero);
+        }
     }
 
     /// <inheritdoc />
