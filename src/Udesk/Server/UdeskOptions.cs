@@ -3,7 +3,7 @@ namespace Udesk.Server;
 /// <summary>
 /// Configuration options for the Udesk server.
 /// </summary>
-public sealed class UdeskOptions
+public sealed record UdeskOptions
 {
     /// <summary>Port to listen on (default 8080).</summary>
     public int Port { get; init; } = 8080;

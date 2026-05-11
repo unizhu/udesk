@@ -65,7 +65,7 @@ public static class Program
             })
             .Build();
 
-        var logger = host.Services.GetRequiredService<ILogger<Program>>();
+        var logger = host.Services.GetRequiredService<ILogger<UdeskHostedService>>();
         logger.LogInformation("Udesk starting on port {Port}, FPS: {Fps}, Quality: {Quality}%",
             options.Port, options.Fps, options.JpegQuality);
 

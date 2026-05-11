@@ -13,6 +13,7 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>CA1848;CA1873;CA1822</NoWarn>
     <ApplicationIcon />
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
