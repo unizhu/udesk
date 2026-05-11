@@ -19,6 +19,12 @@ public static class Program
     {
         var options = ParseArgs(args);
 
+        Console.WriteLine($"udesk starting — port: {options.Port}, fps: {options.Fps}, quality: {options.JpegQuality}%");
+        if (options.Pin is not null) Console.WriteLine($"PIN: enabled ({options.Pin.Length} digits)");
+        if (options.EnableTls) Console.WriteLine("TLS: enabled");
+        Console.WriteLine($"Monitor: {(options.MonitorIndex?.ToString() ?? "primary")}");
+        Console.WriteLine();
+
         using var host = Host.CreateDefaultBuilder(args)
             .ConfigureServices((_, services) =>
             {

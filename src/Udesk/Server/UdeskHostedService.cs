@@ -29,7 +29,7 @@ internal sealed class UdeskHostedService : IHostedService, IDisposable
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var token = _cts.Token;
 
-        // Start capture and server concurrently
+        // Start capture in background
         _ = Task.Run(async () =>
         {
             try
@@ -42,14 +42,17 @@ internal sealed class UdeskHostedService : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"[ERROR] Screen capture failed: {ex.Message}");
                 _logger.LogError(ex, "Screen capture failed");
             }
         }, token);
 
+        // Start server in background — errors are logged with Console.WriteLine for visibility
         _ = Task.Run(async () =>
         {
             try
             {
+                Console.WriteLine("Starting HTTP server...");
                 await _server.StartAsync(token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -58,10 +61,14 @@ internal sealed class UdeskHostedService : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"[ERROR] Server failed: {ex.GetType().Name}: {ex.Message}");
+                if (ex.InnerException is not null)
+                    Console.WriteLine($"[ERROR] Inner: {ex.InnerException.Message}");
                 _logger.LogError(ex, "Server failed");
             }
         }, token);
 
+        Console.WriteLine("Udesk hosted service started");
         _logger.LogInformation("Udesk hosted service started");
         return Task.CompletedTask;
     }

@@ -74,6 +74,8 @@ public sealed class UdeskServer : IDisposable
         var wildcardPrefix = $"{scheme}://+:{_options.Port}/";
         var localhostPrefix = $"{scheme}://localhost:{_options.Port}/";
 
+        Console.WriteLine($"Attempting to bind: {wildcardPrefix}");
+
         // Try wildcard (LAN access) first, fall back to localhost (loopback only)
         _httpListener.Prefixes.Clear();
         _httpListener.Prefixes.Add(wildcardPrefix);
@@ -81,18 +83,24 @@ public sealed class UdeskServer : IDisposable
         try
         {
             _httpListener.Start();
+            Console.WriteLine($"Bound to: {wildcardPrefix}");
         }
-        catch (HttpListenerException)
+        catch (HttpListenerException ex)
         {
+            Console.WriteLine($"Wildcard bind failed ({ex.ErrorCode}): {ex.Message}");
+            Console.WriteLine($"Falling back to: {localhostPrefix}");
+
             // Wildcard requires admin or netsh urlacl — fall back to localhost
             _httpListener.Prefixes.Clear();
             _httpListener.Prefixes.Add(localhostPrefix);
             try
             {
                 _httpListener.Start();
+                Console.WriteLine($"Bound to: {localhostPrefix}");
             }
             catch (HttpListenerException ex2)
             {
+                Console.WriteLine($"[FATAL] Localhost bind also failed ({ex2.ErrorCode}): {ex2.Message}");
                 _logger.LogCritical(ex2, "Failed to start server on port {Port}. Port may be in use.", _options.Port);
                 throw;
             }
@@ -100,6 +108,12 @@ public sealed class UdeskServer : IDisposable
         }
 
         _serverCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        var listenUrl = $"{scheme}://localhost:{_options.Port}/";
+        Console.WriteLine();
+        Console.WriteLine($"Udesk ready — open {listenUrl} in your browser");
+        Console.WriteLine($"Press Ctrl+C to stop");
+        Console.WriteLine();
 
         if (_options.EnableTls)
         {
