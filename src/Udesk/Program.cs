@@ -3,7 +3,6 @@ using Udesk.Input;
 using Udesk.LockScreen;
 using Udesk.Security;
 using Udesk.Server;
-using System.Text;
 
 namespace Udesk;
 
@@ -85,7 +84,7 @@ public static class Program
         app.MapGet("/", (HttpContext context) =>
         {
             var html = EmbeddedResources.GetViewerHtml();
-            return Results.Bytes(html, "text/html", Encoding.UTF8);
+            return Results.File(html, "text/html; charset=utf-8");
         });
 
         // Serve TLS certificate for download
