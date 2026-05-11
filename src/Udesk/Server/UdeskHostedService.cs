@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Hosting;
+using Udesk.Capture;
 
 namespace Udesk.Server;
 
